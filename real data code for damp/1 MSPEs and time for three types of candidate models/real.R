@@ -60,13 +60,11 @@ result <- foreach(i = 1:S) %dopar% {
   R_order <- func_lm(xs,ys)
   x1 <- xt[,R_order]
   data1 <- as.data.frame(cbind(yt, x1))
-  names(data1) <- c("y", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8")
   
   ####### Lasso
   R_order2 <- func_Lasso(xs,ys)
   x2 <- xt[,R_order2]
   data2 <- as.data.frame(cbind(yt,x2))
-  names(data2) <- c("y","x1","x2","x3","x4","x5","x6","x7","x8")
 
   sub <- sample(c(1:nrow(data1)), 20032)
   train1 <- as.matrix(data1[sub,])
