@@ -1,13 +1,6 @@
-#####figure1
 rm(list=ls())
 
-library(data.table)
-library(readxl)
-library(tidyverse)
-library(scales)
-library(patchwork)
 library(colorspace)
-library(reshape2)
 library(ggplot2)
 library(grid)
 library(gridExtra)
