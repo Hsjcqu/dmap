@@ -1,65 +1,15 @@
-##myfun
-#######
-train_test_split <- function(data, sub) {
-  train <- as.matrix(data[sub,])
-  test <- as.matrix(data[-sub,])
-  list(y.train=train[,1], x.train=train[,-1], y.test=test[,1], x.test=test[,-1])
-}
-#### 
-func_lm <- function(x,y){
-  R1 <- rep()
-  R2 <- rep()
-  n <- ncol(x)
-  for(i in 1:n){
-    R1 <- append(R1,i)
-    dm_xp <- x[,i]
-    data_m <- as.data.frame(cbind(y,dm_xp))
-    fit_lm <- lm(y~dm_xp+0,data = data_m)
-    R2<- append(R2,summary(fit_lm)$r.squared)
-  }
-  R <- cbind(R1,R2)
-  R_order <- order(R[,2], decreasing = T)
-  return(R_order)
-}
-
-###lasso
-func_Lasso <- function(x,y){
-  library(lars)
-  x <- as.matrix(x)
-  y <- as.matrix(y)
-  fit <- lars(x, y, type = "lasso")
-  
-  coef_path <- fit$beta
-  
-  result <- data.frame(Variable = character(0), Step = integer(0))
-  
-  for (i in 1:ncol(coef_path)) {
-    coefs <- coef_path[,i]
-    first_non_zero <- which(coefs != 0)[1]
-    
-    if (!is.na(first_non_zero)) {
-      result <- rbind(result, data.frame(Variable = i, Step = first_non_zero))
-    }
-  }
-  
-  result <- result[order(result$Step), ]
-  return(result[,1])
-}
-# library(MASS)
-# library(splines)
-# library(quadprog)
-# install.packages("quadprog")
+library(MASS)
+library(quadprog)
 
 
 CLS = function(H, b){
-  # min w'*H'*H*w - 2b'*w, s.t: w>=0, sum(w)=1
   p = length(b)
   Dmat = t(H)%*%H 
   if(qr(Dmat)$rank<p) Dmat = Dmat + diag(rep(1e-9, p))
   dvec = b     
   Amat = cbind(rep(1, p), diag(rep(1, p)))
   bvec = c(1, rep(0, p))
-  sc <- norm(Dmat,"2")
+  sc = norm(Dmat, "2")
   fit.cls = quadprog::solve.QP(Dmat/sc, dvec/sc, Amat, bvec, meq=1, factorized=FALSE)
   list(solution=fit.cls$solution, solution.unc = fit.cls$unconstrained.solution)
 }
@@ -123,44 +73,6 @@ candset_fun = function(L, type="nested", n_group=NULL){
 }
 
 #### Proposed DMAP-SA method #####################
-beta_csa_ma = function(X, Y, J,cm_type="nested", n_group=NULL){
-  N = nrow(X) 
-  p_max = ncol(X)
-  
-  id_list = index_partition_fun(N=N, J=J)
-  n = id_list[[2]]
-  xid_list = id_list[[1]]
-  
-  ## candidate model sets  ##
-  cset_list = candset_fun(L=p_max, type=cm_type, n_group=n_group)
-  cset = cset_list[[1]]
-  M = cset_list[[2]]
-  betajm <- list()
-  beta_list <- list()
-  for(j in 1:J){  
-    xid_j = xid_list[[j]]
-    Yj = Y[xid_j] 
-    for(m in 1:M){
-      cmm = cset[[m]]
-      Xjm = as.matrix(X[xid_j, cmm])
-      dfj = data.frame(y=Yj, x=Xjm)
-      lmfit_j =  lm(y~., data=dfj)
-      index <- (j-1)*M+m
-      betajm[[index]] = coef(lmfit_j)
-    }
-  } 
-  for(m in 1:M){
-    inter_v2<-0
-    for(j in 1:J){
-      inter_v1<-(j-1)*M+m
-      inter_v2<-betajm[[inter_v1]]+inter_v2
-    }
-    beta_list[[m]]<-inter_v2/J
-  }
-  list(beta_list=beta_list)
-}
-
-
 dmap_sa = function(X, Y, X_new, Y_new, J, phi_type = NULL, cm_type="nested", n_group=NULL){
   N = nrow(X) 
   p_max = ncol(X)
@@ -179,7 +91,6 @@ dmap_sa = function(X, Y, X_new, Y_new, J, phi_type = NULL, cm_type="nested", n_g
   
   ## compute on each machine  ##
   w_est = matrix(nrow=M, ncol=J)
-  # beta_mat = matrix(nrow=N, ncol=M)
   mu_est = matrix(NA, N, M)
   mu_pred = matrix(NA, n_new*J, M)
   
@@ -193,11 +104,8 @@ dmap_sa = function(X, Y, X_new, Y_new, J, phi_type = NULL, cm_type="nested", n_g
       Xjm = as.matrix(X[xid_j, cmm])
       dfj = data.frame(y=Yj, x=Xjm)
       lmfit_j =  lm(y~., data=dfj) 
-      # betajm = coef(lmfit_j)
       mu_est[xid_j, m] = as.vector(fitted(lmfit_j))
-      # mu_est[xid_j, m] = as.vector(Xjm%*%as.vector(betajm))
       mu_pred[(n_new*(j-1)+1):(n_new*j), m] = as.vector(predict(lmfit_j, newdata=data.frame(x=X_new[, cmm])))
-      # mu_pred[(n_new*(j-1)+1):(n_new*j), m] = as.matrix(X_new[, cmm])%*%betajm  
     }
     ## find weights ##
     muj_est = as.matrix(mu_est[xid_j, ])
@@ -223,7 +131,56 @@ dmap_sa = function(X, Y, X_new, Y_new, J, phi_type = NULL, cm_type="nested", n_g
   mu_w_pred_ew = rowMeans(matrix(as.vector(mu_pred%*%w_ew), ncol=J))
   mspe_ew = mean( (Y_new - mu_w_pred_ew)^2 )
   
-  list(mspe = mspe,w_vec = w_vec, mu_w_est=mu_w_est, mspe_ew=mspe_ew, mu_w_est_ew=mu_w_est_ew, t_cost=t_cost)
+  list(mspe = mspe, mu_w_est=mu_w_est, mspe_ew=mspe_ew, mu_w_est_ew=mu_w_est_ew, t_cost=t_cost)
+} 
+
+
+#### weighted beta via DMAP-SA method ####
+beta_dmap_sa = function(X, Y, J, phi_type = NULL, cm_type="nested", n_group=NULL){
+  N = nrow(X) 
+  p_max = ncol(X)
+  
+  id_list = index_partition_fun(N=N, J=J)
+  n = id_list[[2]]
+  xid_list = id_list[[1]]
+  if(is.null(phi_type)){ phi = 2 }else{ phi=log(n) }
+  
+  ## candidate model sets  ##
+  cset_list = candset_fun(L=p_max, type=cm_type, n_group=n_group)
+  cset = cset_list[[1]]
+  M = cset_list[[2]]
+  k_vec = cset_list[[3]]+1
+  
+  ## compute on each machine  ##
+  mu_est = matrix(NA, N, M)
+  w_est = matrix(nrow=M, ncol=J)
+  beta_w_mat = matrix(0, nrow=M*p_max, ncol=J)
+
+  for(j in 1:J){  
+    xid_j = xid_list[[j]]
+    Yj = Y[xid_j] 
+    for(m in 1:M){
+      cmm = cset[[m]]
+      Xjm = as.matrix(X[xid_j, cmm])
+      dfj = data.frame(y=Yj, x=Xjm)
+      lmfit_j =  lm(y~., data=dfj) 
+      betajm = as.vector(coef(lmfit_j)[-1])
+      beta_w_mat[(m-1)*p_max +cmm, j] = betajm
+      mu_est[xid_j, m] = as.vector(fitted(lmfit_j))
+    }
+    ## find weights ##
+    muj_est = as.matrix(mu_est[xid_j, ])
+    df_full = data.frame(y=Yj, x=X[xid_j,])
+    sigmaj2_max = sigma(lm(y~., data=df_full))^2
+    H0 = muj_est
+    b0 = as.vector(t(Yj)%*%muj_est) - phi*sigmaj2_max*k_vec/2
+    w_est[, j] = CLS(H=H0, b=b0)$solution
+  } 
+  
+  w_vec = rowMeans(w_est)
+  beta_w_est = matrix(apply(beta_w_mat, 1, mean), ncol=M)%*%w_vec
+
+  list(beta_w=beta_w_est)
 } 
 
 
@@ -314,8 +271,6 @@ beta_csl_ma = function(X, Y, J, T, cm_type="nested", n_group=NULL){
 } 
 
 
-
-
 dmap_sl = function(X, Y, X_new, Y_new, J, T=1, phi_type = NULL, cm_type="nested", n_group=NULL){
   N = nrow(X) 
   p_max = ncol(X)
@@ -377,35 +332,61 @@ dmap_sl = function(X, Y, X_new, Y_new, J, T=1, phi_type = NULL, cm_type="nested"
   mu_w_pred_ew = rowMeans(matrix(as.vector(mu_pred%*%w_ew), ncol=J))
   mspe_ew = mean( (Y_new - mu_w_pred_ew)^2 )
   
-  list(mspe = mspe,w_vec = w_vec, mu_w_est=mu_w_est, mspe_ew=mspe_ew, mu_w_est_ew=mu_w_est_ew, t_cost=t_cost)
+  list(mspe = mspe, mu_w_est=mu_w_est, mspe_ew=mspe_ew, mu_w_est_ew=mu_w_est_ew, t_cost=t_cost)
 } 
 
 
 
-## Global Model Averaging Method ############
-beta_ma = function(X, Y,cm_type="nested", n_group=NULL){
+beta_dmap_sl = function(X, Y, J, T=1, phi_type = NULL, cm_type="nested", n_group=NULL){
   N = nrow(X) 
   p_max = ncol(X)
+  res_beta = beta_csl_ma(X=X, Y=Y, J=J, T=T, cm_type=cm_type, n_group=n_group)
+  beta_cls_list =res_beta$beta_list
   
   id_list = index_partition_fun(N=N, J=J)
   n = id_list[[2]]
   xid_list = id_list[[1]]
+  if(is.null(phi_type)){ phi = 2 }else{ phi=log(n) }
   
   ## candidate model sets  ##
   cset_list = candset_fun(L=p_max, type=cm_type, n_group=n_group)
   cset = cset_list[[1]]
   M = cset_list[[2]]
-  beta_list <- list()
+  k_vec = cset_list[[3]]+1
+  
+  ## compute on each machine  ##
+  w_est = matrix(nrow=M, ncol=J)
+  mu_est = matrix(NA, N, M)
+  beta_w_mat = matrix(0, nrow=M*p_max, ncol=J)
+
+  for(j in 1:J){  
+    xid_j = xid_list[[j]]
+    Yj = Y[xid_j] 
     for(m in 1:M){
       cmm = cset[[m]]
-      Xm = as.matrix(X[, cmm])
-      df = data.frame(y=Y, x=Xm)
-      lmfit =  lm(y~., data=df)
-      beta_list[[m]] = coef(lmfit)
+      Xjm = cbind(1, as.matrix(X[xid_j, cmm]))
+      mu_est[xid_j, m] = as.vector(Xjm%*%beta_cls_list[[m]])
+      betajm = beta_cls_list[[m]][-1]
+      beta_w_mat[(m-1)*p_max +cmm, j] = betajm
     }
+    ## find weights ##
+    muj_est = as.matrix(mu_est[xid_j, ])
+    # Xfull = X[xid_j, ]
+    df_full = data.frame(y=Yj, x=X[xid_j, ])
+    sigmaj2_max = sigma(lm(y~., data=df_full))^2
+    H0 = muj_est
+    b0 = as.vector(t(Yj)%*%muj_est) - phi*sigmaj2_max*k_vec/2
+    w_est[, j] = CLS(H=H0, b=b0)$solution
+  } 
+  
+  w_vec = rowMeans(w_est)
+  beta_w_est = matrix(apply(beta_w_mat, 1, mean), ncol=M)%*%w_vec
 
-  list(beta_list=beta_list)
-}
+  list(beta_w = beta_w_est)
+} 
+
+
+## Global Model Averaging Method ############
 ma_global = function(X, Y, X_new, Y_new, phi_type = NULL, cm_type="nested", n_group=NULL){
   N = nrow(X) 
   p_max = ncol(X)
@@ -444,9 +425,43 @@ ma_global = function(X, Y, X_new, Y_new, phi_type = NULL, cm_type="nested", n_gr
   mspe = mean( (Y_new - mu_w_pred)^2 )
   t2 = proc.time()
   t_cost = (t2-t1)[3]
-  list(mspe = mspe,w_vec = w_est, mu_w_est=mu_w_est, t_cost=t_cost)
+  list(mspe = mspe, mu_w_est=mu_w_est, t_cost=t_cost)
 }
 
+
+beta_ma_global = function(X, Y, phi_type = NULL, cm_type="nested", n_group=NULL){
+  N = nrow(X) 
+  p_max = ncol(X)
+  if(is.null(phi_type)){ phi = 2 }else{ phi=log(N) }
+  
+  ## candidate model sets  ##
+  cset_list = candset_fun(L=p_max, type=cm_type, n_group=n_group)
+  cset = cset_list[[1]]
+  M = cset_list[[2]]
+  k_vec = cset_list[[3]]+1
+  
+  mu_est = matrix(NA, N, M)
+  beta_w_mat = matrix(0, nrow=p_max, ncol=M)
+
+  for(m in 1:M){
+    cmm = cset[[m]]
+    Xm = as.matrix(X[, cmm])
+    dfm = data.frame(y=Y, x=Xm)
+    lmfit_full = lm(y~., data=dfm)  
+    betam = coef(lmfit_full)[-1]
+    mu_est[, m] = as.vector(fitted(lmfit_full))
+    beta_w_mat[cmm, m] = betam
+  }
+  ## find weights ##
+  mu_est = as.matrix(mu_est)
+  sigma2_max = sigma(lm(Y~X))^2
+  H0 = mu_est
+  b0 = as.vector(t(Y)%*%mu_est) - phi*sigma2_max*k_vec/2
+  w_est = CLS(H=H0, b=b0)$solution
+  
+  beta_w_est = beta_w_mat%*%w_est
+  list(beta_w = beta_w_est)
+} 
 
 
 ##### Distributed prediction method based on a single model ##############
@@ -515,6 +530,19 @@ dp_single = function(X, Y, X_new, Y_new, J, T=1){
   mspe = mean( (Y_new - mu_pred)^2 )
   list(mspe = mspe, mu_est=mu_est)
 } 
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
